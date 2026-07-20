@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FlashAttention Sim - 逐步可视化</title>
+<style>
+body { font-family:'PingFang SC','Microsoft YaHei',sans-serif; margin:0; padding:20px; background:#f5f5f5; color:#333; font-size:15px; line-height:1.8; }
+.wrap { max-width:880px; margin:0 auto; }
+h1 { text-align:center; font-size:26px; margin-bottom:4px; }
+.sub { text-align:center; color:#888; font-size:13px; margin-bottom:20px; }
+
+/* Nav */
+.nav { display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+.nav button { padding:7px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; }
+.nav .btn { background:#3b82f6; color:#fff; }
+.nav .btn:hover { background:#2563eb; }
+.nav .btn:disabled { background:#bbb; cursor:default; }
+.nav .pos { font-family:monospace; font-size:13px; color:#666; min-width:60px; text-align:center; }
+.pills { display:flex; gap:5px; justify-content:center; flex-wrap:wrap; margin-bottom:16px; }
+.pills button { padding:4px 11px; border:2px solid #ddd; border-radius:12px; background:#fff; cursor:pointer; font-size:12px; font-family:monospace; color:#666; }
+.pills button.on { border-color:#3b82f6; background:#eff6ff; color:#3b82f6; font-weight:700; }
+
+/* Card */
+.card { background:#fff; border-radius:10px; box-shadow:0 1px 6px rgba(0,0,0,.05); padding:24px; }
+.card h2 { font-size:18px; margin:0 0 12px; color:#1e3a5f; }
+
+/* Code */
+.code { background:#1e1e2e; border-radius:8px; padding:14px; overflow-x:auto; margin-bottom:14px; }
+.code pre { font-family:'Courier New',monospace; font-size:12.5px; line-height:1.7; color:#cdd6f4; white-space:pre-wrap; margin:0; }
+.hl { background:rgba(59,130,246,.15); display:block; margin:0 -14px; padding:0 14px; border-left:3px solid #3b82f6; }
+.cm { color:#6c7086; }
+
+/* Shape */
+.shape { display:inline-block; font-family:monospace; font-size:12px; background:#f0f4f8; padding:4px 10px; border-radius:4px; color:#555; margin-bottom:10px; }
+.shape b { color:#3b82f6; }
+
+/* Overall purpose */
+.purpose { background:#f0f7ff; border-left:3px solid #3b82f6; border-radius:0 6px 6px 0; padding:10px 14px; font-size:14px; margin-bottom:14px; }
+
+/* Explain */
+.ex { background:#fffbeb; border-left:3px solid #f59e0b; border-radius:0 6px 6px 0; padding:10px 14px; font-size:13px; line-height:1.7; margin-top:12px; }
+.ex b { color:#92400e; }
+
+/* Tensor table */
+.tt { border-collapse:collapse; margin:8px 0; font-family:monospace; font-size:12px; }
+.tt th, .tt td { border:1px solid #d1d5db; padding:4px 8px; text-align:center; }
+.tt th { background:#f0f4f8; font-weight:700; color:#374151; }
+.tt td { background:#fff; }
+.tt .pos { background:#fef3c7; color:#92400e; }
+.tt .freq { background:#dbeafe; color:#1e40af; }
+.tt .val { background:#ede9fe; color:#6b21a8; }
+
+/* Tensor row */
+.tr { display:flex; gap:3px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+.tc { display:inline-flex; align-items:center; justify-content:center; min-width:46px; height:28px; border-radius:4px; font-family:monospace; font-size:11.5px; font-weight:700; }
+.b { background:#dbeafe; color:#1e40af; }
+.r { background:#fce7f3; color:#9d174d; }
+.g { background:#d1fae5; color:#065f46; }
+.p { background:#ede9fe; color:#6b21a8; }
+.a { background:#fef3c7; color:#92400e; }
+.note { font-size:12px; color:#888; margin-top:4px; }
+.arr { text-align:center; color:#3b82f6; font-size:18px; margin:4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>FlashAttention Sim 分块注意力模拟</h1>
+<div class="sub">逐步可视化 · 严格对应 notebook 代码与注释</div>
+<div class="pills" id="pills"></div>
+<div class="nav">
+  <button class="btn" id="prevBtn">◀ 上一步</button>
+  <span class="pos" id="pos"></span>
+  <button class="btn" id="nextBtn">下一步 ▶</button>
+</div>
+<div class="card" id="card"></div>
+</div>
+<script>
+const S = [
+
+// ====== 整体作用 ======
+{
+  t: 'flash_attention_forward_sim：整体作用',
+  code: `<span class="cm"># flash_attention_forward_sim(q, k, v, block_size=2)
+# q, k, v: (seq_len, dim) — 无 Batch/Head 维度
+# 返回: out (seq_len, dim) — 和标准 Attention 数学等价</span>`,
+  shape: '',
+  purpose: '纯 PyTorch 模拟 FlashAttention 前向传播。核心思想：不一次性算出完整的 S=QK^T 矩阵（O(N²) 显存），而是把 Q/K/V 分块（Tiling），在每个小块上计算分数，用 Online Softmax 动态维护全局统计量，最终结果和标准 Attention 完全等价。',
+  viz: `<b>标准 Attention vs FlashAttention：</b>
+<br><br>
+<table class="tt">
+<tr><th></th><th>标准 Attention</th><th>FlashAttention</th></tr>
+<tr><td>计算方式</td><td>一次性算完整 S=QK^T</td><td>分块计算 S_ij = Q_i K_j^T</td></tr>
+<tr><td>显存</td><td>O(N²) 存 S 矩阵</td><td>O(N) 只存当前块</td></tr>
+<tr><td>Softmax</td><td>全局 softmax（需要所有 S）</td><td>Online Softmax（边算边更新）</td></tr>
+<tr><td>数学等价</td><td>—</td><td>完全等价，无近似</td></tr>
+</table>
+<br><b>三层循环结构：</b>
+<br><code>for i in Q块:        ← 外层：遍历 Q 的分块</code>
+<br><code>  for j in K,V块:    ← 内层：遍历 K/V 的分块</code>
+<br><code>    计算 S_ij, 更新 m, l, out</code>
+<br><br><b>实现分 6 步：</b>
+<br>TODO 1: 初始化 out, m, l
+<br>TODO 2: 计算块分数 S_ij
+<br>TODO 3: 更新局部/全局最大值
+<br>TODO 4: 计算 P_ij = exp(S_ij - m_new)
+<br>TODO 5: 更新局部/全局指数和
+<br>TODO 6: Online Softmax 修正输出`,
+  ex: ''
+},
+
+// ====== TODO 1: 初始化 ======
+{
+  t: 'TODO 1: 初始化全局状态 out, m, l',
+  code: `<span class="hl">out = torch.zeros((seq_len, dim), device=q.device)</span>
+<span class="hl">m = torch.full((seq_len, 1), -float('inf'), device=q.device)</span>
+<span class="hl">l = torch.zeros((seq_len, 1), device=q.device)</span>`,
+  shape: '<b>out</b> (N, D), <b>m</b> (N, 1), <b>l</b> (N, 1)',
+  purpose: '',
+  viz: `<b>三个全局状态变量：</b>
+<br><br>
+<table class="tt">
+<tr><th>变量</th><th>初始值</th><th>形状</th><th>作用</th></tr>
+<tr><td><b>out</b></td><td>全 0</td><td>(N, D)</td><td>累加输出 O，最终等价于 softmax(S) @ V</td></tr>
+<tr><td><b>m</b></td><td>-inf</td><td>(N, 1)</td><td>每行的全局最大值，用于数值稳定的 Softmax</td></tr>
+<tr><td><b>l</b></td><td>0</td><td>(N, 1)</td><td>每行的全局指数和 Σexp(S - m)</td></tr>
+</table>
+<br><b>为什么 m 初始化为 -inf？</b>
+<br>第一个块来的时候，<code>torch.maximum(-inf, m_block)</code> 会直接等于 m_block。-inf 是"还没看到任何数据"的占位符。
+<br><br><b>为什么用 (N, 1) 而不是 (N,)？</b>
+<br>keepdim 风格，方便后续和 (block_size, block_size) 的 S_ij 做广播。l_i 是 (B, 1)，S_ij 是 (B, B)，广播时 1 维自动扩展。`,
+  ex: `<b>和标准 Attention 的对比：</b>标准实现需要一次性分配 (N, N) 的 S 矩阵。这里只分配 (N, D) + (N, 1) + (N, 1)，显存从 O(N²) 降到 O(N)。`
+},
+
+// ====== TODO 2: S_ij ======
+{
+  t: 'TODO 2: 计算当前块的未归一化分数 S_ij',
+  code: `<span class="hl">S_ij = q_block @ k_block.transpose(-2, -1)</span>`,
+  shape: '<b>q_block</b> (B, D) @ <b>k_block^T</b> (D, B) = <b>S_ij</b> (B, B)',
+  purpose: '',
+  viz: `<b>分块矩阵乘法：</b>
+<br><br>标准 Attention 算完整 S = Q @ K^T，形状 (N, N)。
+<br>这里只算当前块 S_ij = Q_i @ K_j^T，形状 (B, B)，B = block_size。
+<br><br>
+<b>示例（N=8, block_size=2）：</b>
+<br>外层 i=0, 内层 j=0: S_00 = Q[0:2] @ K[0:2]^T → (2,2)
+<br>外层 i=0, 内层 j=1: S_01 = Q[0:2] @ K[2:4]^T → (2,2)
+<br>...
+<br>外层 i=0, 内层 j=3: S_03 = Q[0:2] @ K[6:8]^T → (2,2)
+<br><br>
+<table class="tt">
+<tr><th></th><th>K[0:2]</th><th>K[2:4]</th><th>K[4:6]</th><th>K[6:8]</th></tr>
+<tr><td class="pos">Q[0:2]</td><td class="val">S_00</td><td class="val">S_01</td><td class="val">S_02</td><td class="val">S_03</td></tr>
+<tr><td class="pos">Q[2:4]</td><td>S_10</td><td>S_11</td><td>S_12</td><td>S_13</td></tr>
+<tr><td class="pos">Q[4:6]</td><td>S_20</td><td>S_21</td><td>S_22</td><td>S_23</td></tr>
+<tr><td class="pos">Q[6:8]</td><td>S_30</td><td>S_31</td><td>S_32</td><td>S_33</td></tr>
+</table>
+标准 Attention 一次性算完整个 8×8 表格；FlashAttention 逐块填入，每次只占 2×2 的显存。`,
+  ex: `<b>q_block 已乘 scale：</b>在外层循环中 <code>q_block = q[i:i+block_size] * scale</code>，所以这里直接矩阵乘法就行，不需要再乘 scale。`
+},
+
+// ====== TODO 3: m_block, m_new ======
+{
+  t: 'TODO 3: 计算局部最大值 m_block，更新全局最大值 m_new',
+  code: `<span class="hl">m_block = torch.max(S_ij, dim=-1, keepdim=True)[0]</span>
+<span class="hl">m_new = torch.maximum(m_i, m_block)</span>`,
+  shape: '<b>m_block</b> (B, 1), <b>m_new</b> (B, 1)',
+  purpose: '',
+  viz: `<b>Online Softmax 的核心第一步：动态更新最大值。</b>
+<br><br>
+<b>① m_block</b> — 当前块 S_ij 每行的最大值
+<br><code>S_ij</code> 形状 (B, B)，对 dim=-1（列方向）取 max，得到每行最大值
+<br><br>示例（S_ij = [[1.0, 3.0], [0.5, 2.0]]）：
+<br>m_block = [[3.0], [2.0]]
+<br><br>
+<b>② m_new</b> — 和历史最大值取较大者
+<br><code>torch.maximum(m_i, m_block)</code> 逐元素取较大值
+<br><br>
+<table class="tt">
+<tr><th></th><th>m_i (历史)</th><th>m_block (当前)</th><th>m_new (更新后)</th></tr>
+<tr><td>行 0</td><td>-inf (首次)</td><td>3.0</td><td class="val">3.0</td></tr>
+<tr><td>行 1</td><td>-inf (首次)</td><td>2.0</td><td class="val">2.0</td></tr>
+</table>
+如果下一个块的 m_block = [[4.0], [1.5]]，则 m_new = [[4.0], [2.0]]——行 0 更新，行 1 保持。`,
+  ex: `<b>为什么要维护最大值？</b> Softmax 需要 exp(x - m) 来防溢出。如果 m 不够大，exp 会爆成 inf。Online Softmax 的精髓是：每看到一个新块，就检查"最大值有没有变大"，如果变了就修正之前的计算。`
+},
+
+// ====== TODO 4: P_ij ======
+{
+  t: 'TODO 4: 计算 P_ij = exp(S_ij - m_new)',
+  code: `<span class="hl">P_ij = torch.exp(S_ij - m_new)</span>`,
+  shape: '<b>P_ij</b> (B, B)',
+  purpose: '',
+  viz: `<b>数值稳定的指数运算：</b>
+<br><br>减去 m_new（每行的全局最大值）后再 exp，确保指数的参数 ≤ 0，不会溢出。
+<br><br>
+<b>示例（m_new = [[3.0], [2.0]]）：</b>
+<table class="tt">
+<tr><th>S_ij</th><th>S_ij - m_new</th><th>exp(...)</th></tr>
+<tr><td>[1.0, 3.0]</td><td>[-2.0, 0.0]</td><td>[0.135, 1.0]</td></tr>
+<tr><td>[0.5, 2.0]</td><td>[-1.5, 0.0]</td><td>[0.223, 1.0]</td></tr>
+</table>
+<br>每行最大值对应的 exp 结果 = 1.0（因为减去了自身），其余 ≤ 1.0。
+<br><br>
+<b>注意：</b>这里的 P_ij 不是最终的注意力权重！它还没有除以全局指数和 l。l 会在 TODO 5 中更新，最终在 TODO 6 中归一化。`,
+  ex: `<b>和标准 Softmax 的区别：</b>标准 Softmax 用全局 m = max(整行)。这里 m_new 是"到目前为止见过的所有块中"的最大值，后面如果遇到更大的值，需要修正。这就是 Online Softmax 的代价——每个块可能被"修正"多次。`
+},
+
+// ====== TODO 5: l_block, l_new ======
+{
+  t: 'TODO 5: 计算局部指数和 l_block，更新全局指数和 l_new',
+  code: `<span class="hl">l_block = torch.sum(P_ij, dim=-1, keepdim=True)</span>
+<span class="hl">l_new = l_i * torch.exp(m_i - m_new) + l_block</span>`,
+  shape: '<b>l_block</b> (B, 1), <b>l_new</b> (B, 1)',
+  purpose: '',
+  viz: `<b>Online Softmax 的核心第二步：修正旧的指数和。</b>
+<br><br>
+<b>① l_block</b> — 当前块 P_ij 每行的和
+<br>P_ij 形状 (B, B)，对 dim=-1 求和，得到 (B, 1)
+<br>示例：P_ij = [[0.135, 1.0], [0.223, 1.0]]
+<br>l_block = [[1.135], [1.223]]
+<br><br>
+<b>② l_new</b> — 修正后的全局指数和
+<br><code>l_new = l_i * exp(m_i - m_new) + l_block</code>
+<br><br>
+<b>修正项 l_i * exp(m_i - m_new) 的含义：</b>
+<br>如果 m_new == m_i（最大值没变），exp(0) = 1，修正项 = l_i，就是简单的累加。
+<br>如果 m_new > m_i（最大值变大了），exp(负数) < 1，旧的指数和需要"缩小"——因为之前是相对于旧的 m_i 算的 exp，现在基准变了。
+<br><br>
+<b>数值示例（第 2 个块，m_i 从 3.0 变到 4.0）：</b>
+<table class="tt">
+<tr><th>项</th><th>计算</th><th>值</th></tr>
+<tr><td>l_i (旧)</td><td>之前累积</td><td>1.135</td></tr>
+<tr><td>m_i</td><td>旧最大值</td><td>3.0</td></tr>
+<tr><td>m_new</td><td>新最大值</td><td>4.0</td></tr>
+<tr><td>exp(m_i - m_new)</td><td>exp(-1)</td><td>0.368</td></tr>
+<tr><td>修正项</td><td>1.135 × 0.368</td><td>0.418</td></tr>
+<tr><td>l_block (新块)</td><td>当前块指数和</td><td>0.8</td></tr>
+<tr><td>l_new</td><td>0.418 + 0.8</td><td class="val">1.218</td></tr>
+</table>`,
+  ex: `<b>为什么叫"Online"？</b> 因为不需要回头重算前面的块。修正项 <code>l_i * exp(m_i - m_new)</code> 用一个乘法就把旧的指数和"平移"到新的基准上，代价是 O(1)。这是 FlashAttention 能分块计算的数学基础。`
+},
+
+// ====== TODO 6: 更新输出 ======
+{
+  t: 'TODO 6: 更新输出 O_i（Online Softmax 修正公式）',
+  code: `<span class="hl">out_i = out_i * (l_i * torch.exp(m_i - m_new) / l_new) + (P_ij @ v_block) / l_new</span>`,
+  shape: '<b>out_i</b> (B, D)',
+  purpose: '',
+  viz: `<b>Online Softmax 的核心第三步：修正旧输出 + 累加新输出。</b>
+<br><br>
+<b>公式拆解：</b>
+<br><br>
+<b>第一项：</b><code>out_i * (l_i * exp(m_i - m_new) / l_new)</code>
+<br>→ 修正旧的输出。之前的 out_i 是相对于旧的 l_i 归一化的，现在要调整到新的 l_new 基准上。
+<br>修正系数 = (旧指数和 / 新指数和) × 基准平移因子
+<br><br>
+<b>第二项：</b><code>(P_ij @ v_block) / l_new</code>
+<br>→ 当前块的贡献。P_ij @ v_block 是未归一化的加权求和，除以 l_new 完成归一化。
+<br><br>
+<b>完整示例（第 1 个块，首次计算）：</b>
+<table class="tt">
+<tr><th>步骤</th><th>计算</th><th>说明</th></tr>
+<tr><td>旧 out_i</td><td>[0, 0, ...]</td><td>初始全 0</td></tr>
+<tr><td>旧 l_i</td><td>0</td><td>初始为 0</td></tr>
+<tr><td>修正项</td><td>0 × exp(...) / l_new = 0</td><td>首次无旧输出</td></tr>
+<tr><td>新贡献</td><td>P_ij @ v_block / l_new</td><td>第一个块的归一化加权和</td></tr>
+<tr><td>新 out_i</td><td>0 + 新贡献</td><td class="val">直接等于当前块结果</td></tr>
+</table>
+<br>
+<b>第 2 个块（最大值变化时）：</b>
+<table class="tt">
+<tr><th>步骤</th><th>计算</th><th>说明</th></tr>
+<tr><td>旧 out_i</td><td>已有值</td><td>上一轮的结果</td></tr>
+<tr><td>修正系数</td><td>l_i × exp(m_i-m_new) / l_new</td><td>旧输出权重（通常 < 1）</td></tr>
+<tr><td>新贡献</td><td>P_ij @ v_block / l_new</td><td>新块的归一化加权和</td></tr>
+<tr><td>新 out_i</td><td>旧×系数 + 新贡献</td><td class="val">两者加权合并</td></tr>
+</table>`,
+  ex: `<b>为什么不等到最后再归一化？</b> 因为每个块的 m 可能不同，如果推迟归一化，需要额外存储每个块的中间结果。Online Softmax 的妙处在于：每一步都输出"到目前为止的归一化结果"，随时可以丢弃旧块，显存始终是 O(N)。`
+},
+
+// ====== 写回全局状态 ======
+{
+  t: '写回全局状态 + 更新循环变量',
+  code: `<span class="hl">m_i = m_new</span>
+<span class="hl">l_i = l_new</span>
+<span class="cm"># 内层循环结束后，写回：</span>
+<span class="hl">out[i:i+block_size] = out_i</span>
+<span class="hl">m[i:i+block_size] = m_i</span>
+<span class="hl">l[i:i+block_size] = l_i</span>`,
+  shape: '',
+  purpose: '',
+  viz: `<b>状态更新的两个层面：</b>
+<br><br>
+<b>① 内层循环内（每个 K/V 块处理完）：</b>
+<br>m_i = m_new, l_i = l_new
+<br>→ 更新当前 Q 块的局部状态，供下一个 K/V 块使用
+<br><br>
+<b>② 外层循环结束（当前 Q 块的所有 K/V 块处理完）：</b>
+<br>out[i:i+B] = out_i, m[i:i+B] = m_i, l[i:i+B] = l_i
+<br>→ 把最终结果写回全局张量
+<br><br>
+<b>完整数据流（seq=8, block=2）：</b>
+<br>
+<table class="tt">
+<tr><th>外层 i</th><th>内层 j</th><th>操作</th></tr>
+<tr><td class="pos">i=0</td><td>j=0,1,2,3</td><td>Q[0:2] 遍历所有 K/V 块，累加 out[0:2]</td></tr>
+<tr><td class="pos">i=2</td><td>j=0,1,2,3</td><td>Q[2:4] 遍历所有 K/V 块，累加 out[2:4]</td></tr>
+<tr><td class="pos">i=4</td><td>j=0,1,2,3</td><td>Q[4:6] 遍历所有 K/V 块，累加 out[4:6]</td></tr>
+<tr><td class="pos">i=6</td><td>j=0,1,2,3</td><td>Q[6:8] 遍历所有 K/V 块，累加 out[6:8]</td></tr>
+</table>
+每个 Q 块独立处理，互不依赖。这就是 FlashAttention 可以并行化外层循环的基础。`,
+  ex: `<b>并行化机会：</b>外层循环的各 Q 块之间完全独立（共享 K/V 但只读），可以并行。真实 FlashAttention 在 GPU 上把外层循环映射到 CUDA blocks，内层循环映射到 threads，利用 SRAM 做分块计算。`
+},
+
+// ====== 测试脚本 ======
+{
+  t: 'test：测试脚本概览',
+  code: `<span class="cm"># 测试用例：
+# 1. seq=8, dim=4, block=2 (标准情况)
+# 2. seq=5, dim=3, block=3 (block 不整除 seq)
+# 3. seq=3, dim=2, block=1 (逐元素分块)
+
+# 每个用例：
+# 标准 Attention: scores = (q @ k^T) * scale
+#                 attn = softmax(scores)
+#                 out_ref = attn @ v
+# FlashAttention: out_sim = flash_attention_forward_sim(q, k, v, block_size)
+# 断言: max(|out_ref - out_sim|) < 1e-5</span>`,
+  shape: '',
+  purpose: '验证 FlashAttention 模拟和标准 Attention 的输出在浮点误差范围内完全一致。测试了 3 种不同的分块情况。',
+  viz: `<b>测试用例设计：</b>
+<table class="tt">
+<tr><th>#</th><th>seq</th><th>dim</th><th>block</th><th>覆盖场景</th></tr>
+<tr><td>1</td><td>8</td><td>4</td><td>2</td><td>标准情况，block 整除 seq</td></tr>
+<tr><td>2</td><td>5</td><td>3</td><td>3</td><td>block 不整除 seq（最后 Q 块只有 2 行）</td></tr>
+<tr><td>3</td><td>3</td><td>2</td><td>1</td><td>逐元素分块（最细粒度）</td></tr>
+</table>
+<br><b>验证方法：</b>
+<br>标准 Attention: <code>out_ref = softmax(QK^T / √d) @ V</code>
+<br>FlashAttention: <code>out_sim = flash_attention_forward_sim(q, k, v, block_size)</code>
+<br>断言: <code>max(|out_ref - out_sim|) < 1e-5</code>
+<br><br>如果 Online Softmax 的修正公式有任何错误，浮点误差会远大于 1e-5。`,
+  ex: `<b>为什么不测更大的序列？</b> 这是模拟实现，用 Python for 循环，大序列会很慢。真实 FlashAttention 用 CUDA/Triton 实现，可以跑 128K 甚至更长的序列。这里的测试目的是验证数学正确性，不是性能。`
+}
+
+];
+
+let cur = 0;
+function render() {
+  const s = S[cur];
+  document.getElementById('pos').textContent = `${cur+1} / ${S.length}`;
+  document.getElementById('prevBtn').disabled = cur===0;
+  document.getElementById('nextBtn').disabled = cur===S.length-1;
+  document.querySelectorAll('.pills button').forEach((b,i)=>b.classList.toggle('on',i===cur));
+  document.getElementById('card').innerHTML = `<h2>${s.t}</h2><div class="code"><pre>${s.code}</pre></div>${s.shape?`<div class="shape">${s.shape}</div>`:''}${s.purpose?`<div class="purpose">${s.purpose}</div>`:''}<div style="font-size:13px;color:#444;line-height:1.8">${s.viz}</div>${s.ex?`<div class="ex">${s.ex}</div>`:''}`;
+}
+function go(d){const n=cur+d;if(n>=0&&n<S.length){cur=n;render();document.getElementById('card').scrollIntoView({behavior:'smooth',block:'start'});}}
+function to(i){cur=i;render();}
+(function(){
+  const p=document.getElementById('pills');
+  S.forEach((s,i)=>{const b=document.createElement('button');b.textContent=i;b.title=s.t;b.onclick=()=>to(i);p.appendChild(b);});
+  document.getElementById('prevBtn').onclick=()=>go(-1);
+  document.getElementById('nextBtn').onclick=()=>go(1);
+  render();
+})();
+document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1);});
+</script>
+</body>
+</html>

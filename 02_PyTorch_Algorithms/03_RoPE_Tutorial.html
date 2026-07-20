@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoPE 旋转位置编码 - 逐步可视化</title>
+<style>
+body { font-family:'PingFang SC','Microsoft YaHei',sans-serif; margin:0; padding:20px; background:#f5f5f5; color:#333; font-size:15px; line-height:1.8; }
+.wrap { max-width:880px; margin:0 auto; }
+h1 { text-align:center; font-size:26px; margin-bottom:4px; }
+.sub { text-align:center; color:#888; font-size:13px; margin-bottom:20px; }
+
+/* Nav */
+.nav { display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:16px; flex-wrap:wrap; }
+.nav button { padding:7px 18px; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; }
+.nav .btn { background:#3b82f6; color:#fff; }
+.nav .btn:hover { background:#2563eb; }
+.nav .btn:disabled { background:#bbb; cursor:default; }
+.nav .pos { font-family:monospace; font-size:13px; color:#666; min-width:60px; text-align:center; }
+.pills { display:flex; gap:5px; justify-content:center; flex-wrap:wrap; margin-bottom:16px; }
+.pills button { padding:4px 11px; border:2px solid #ddd; border-radius:12px; background:#fff; cursor:pointer; font-size:12px; font-family:monospace; color:#666; }
+.pills button.on { border-color:#3b82f6; background:#eff6ff; color:#3b82f6; font-weight:700; }
+
+/* Card */
+.card { background:#fff; border-radius:10px; box-shadow:0 1px 6px rgba(0,0,0,.05); padding:24px; }
+.card h2 { font-size:18px; margin:0 0 12px; color:#1e3a5f; }
+
+/* Code */
+.code { background:#1e1e2e; border-radius:8px; padding:14px; overflow-x:auto; margin-bottom:14px; }
+.code pre { font-family:'Courier New',monospace; font-size:12.5px; line-height:1.7; color:#cdd6f4; white-space:pre-wrap; margin:0; }
+.hl { background:rgba(59,130,246,.15); display:block; margin:0 -14px; padding:0 14px; border-left:3px solid #3b82f6; }
+.cm { color:#6c7086; }
+
+/* Shape */
+.shape { display:inline-block; font-family:monospace; font-size:12px; background:#f0f4f8; padding:4px 10px; border-radius:4px; color:#555; margin-bottom:10px; }
+.shape b { color:#3b82f6; }
+
+/* Overall purpose */
+.purpose { background:#f0f7ff; border-left:3px solid #3b82f6; border-radius:0 6px 6px 0; padding:10px 14px; font-size:14px; margin-bottom:14px; }
+
+/* Explain */
+.ex { background:#fffbeb; border-left:3px solid #f59e0b; border-radius:0 6px 6px 0; padding:10px 14px; font-size:13px; line-height:1.7; margin-top:12px; }
+.ex b { color:#92400e; }
+
+/* Tensor table */
+.tt { border-collapse:collapse; margin:8px 0; font-family:monospace; font-size:12px; }
+.tt th, .tt td { border:1px solid #d1d5db; padding:4px 8px; text-align:center; }
+.tt th { background:#f0f4f8; font-weight:700; color:#374151; }
+.tt td { background:#fff; }
+.tt .pos { background:#fef3c7; color:#92400e; }
+.tt .freq { background:#dbeafe; color:#1e40af; }
+.tt .val { background:#ede9fe; color:#6b21a8; }
+
+/* Tensor row */
+.tr { display:flex; gap:3px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+.tc { display:inline-flex; align-items:center; justify-content:center; min-width:46px; height:28px; border-radius:4px; font-family:monospace; font-size:11.5px; font-weight:700; }
+.b { background:#dbeafe; color:#1e40af; }
+.r { background:#fce7f3; color:#9d174d; }
+.g { background:#d1fae5; color:#065f46; }
+.p { background:#ede9fe; color:#6b21a8; }
+.a { background:#fef3c7; color:#92400e; }
+.note { font-size:12px; color:#888; margin-top:4px; }
+.arr { text-align:center; color:#3b82f6; font-size:18px; margin:4px 0; }
+.grid { display:inline-flex; flex-direction:column; gap:2px; }
+.grid .tr { gap:2px; }
+.rl { width:16px; font-size:10px; color:#aaa; text-align:right; padding-right:2px; font-family:monospace; flex-shrink:0; }
+
+/* Unit circle */
+.uc-r { display:flex; gap:5px; flex-wrap:wrap; margin:4px 0; }
+.uc { width:56px; height:56px; border:1px solid #e5e7eb; border-radius:5px; position:relative; background:#fafbfc; }
+.uc .xa,.uc .ya { position:absolute; background:#e5e7eb; }
+.uc .xa { width:56%; height:1px; left:22%; top:50%; }
+.uc .ya { width:1px; height:56%; top:22%; left:50%; }
+.uc .lb { position:absolute; bottom:1px; left:2px; font-family:monospace; font-size:8px; color:#888; }
+
+/* Big rot */
+.rot-r { display:flex; gap:10px; flex-wrap:wrap; margin:4px 0; }
+.rot-i { text-align:center; }
+.rot-c { width:80px; height:80px; border:1px solid #e5e7eb; border-radius:5px; position:relative; background:#fafbfc; }
+.rot-c .xa,.rot-c .ya { position:absolute; background:#e5e7eb; }
+.rot-c .xa { width:68%; height:1px; left:16%; top:50%; }
+.rot-c .ya { width:1px; height:68%; top:16%; left:50%; }
+.ri { font-family:monospace; font-size:9px; color:#666; margin-top:2px; line-height:1.4; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>RoPE 旋转位置编码</h1>
+<div class="sub">逐步可视化 · 严格对应 notebook 代码与注释</div>
+<div class="pills" id="pills"></div>
+<div class="nav">
+  <button class="btn" id="prevBtn">◀ 上一步</button>
+  <span class="pos" id="pos"></span>
+  <button class="btn" id="nextBtn">下一步 ▶</button>
+</div>
+<div class="card" id="card"></div>
+</div>
+<script>
+const S = [
+
+// ====== precompute_freqs_cis ======
+
+// 0 - 整体作用
+{
+  t: 'precompute_freqs_cis：整体作用',
+  code: `<span class="cm"># precompute_freqs_cis(dim=64, end=16, theta=10000)</span>`,
+  shape: '',
+  purpose: '预计算一组复数旋转因子 freqs_cis。每个位置、每个维度对都有一个唯一的旋转角度，后续用复数乘法把 Q/K 向量旋转对应角度，就完成了位置编码。',
+  viz: `输入：dim=64（head_dim）, end=16（seq_len）
+<br>输出：freqs_cis shape = (16, 32) complex64
+<br><br>实现分 4 步：计算逆频率 → 位置索引 → 外积生成角度 → 极坐标转复数`,
+  ex: ''
+},
+
+// 1 - 逆频率
+{
+  t: 'precompute_freqs_cis · 第 1 行：计算逆频率',
+  code: `<span class="hl">freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[:dim // 2].float() / dim))</span>`,
+  shape: '<b>freqs</b> shape: (32,)',
+  purpose: '',
+  viz: `从内到外拆解：
+<br><br><b>torch.arange(0, dim, 2)</b> — 以步长2生成偶数索引
+<br><code>[0, 2, 4, 6, ..., 62]</code> 共32个值
+<br><br><b>[:dim//2]</b> — 截取前32个（此处刚好等于dim//2，没有裁掉）
+<br><br><b>.float() / dim</b> — 除以64，得到指数
+<br><code>[0/64, 2/64, 4/64, ..., 62/64] = [0, 0.03125, 0.0625, ..., 0.96875]</code>
+<br><br><b>theta ** (...)</b> — 10000的这些幂次
+<br><code>[10000^0, 10000^0.03125, ...] = [1, 1.47, 2.15, ..., 10000]</code>
+<br><br><b>1.0 / (...)</b> — 取倒数，得到逆频率
+<div class="tr" style="margin-top:6px">
+  <div class="tc b">1.0</div><div class="tc b">0.68</div><div class="tc b">0.47</div><div class="tc b">...</div><div class="tc b">0.0001</div>
+</div>`,
+  ex: `<b>为什么步长2？</b> 最后一维按实部/虚部两两配对，步长2枚举每对的偶数位置，对应公式 θ<sup>-2i/d</sup> 里的 2i。
+<br><br><b>直觉：</b>低维（左边）频率高、旋转快；高维（右边）频率低、旋转慢。就像不同频率的正弦波，低频捕捉远距离位置关系，高频捕捉近距离位置关系。`
+},
+
+// 2 - 位置索引
+{
+  t: 'precompute_freqs_cis · 第 2 行：生成位置索引',
+  code: `<span class="hl">t = torch.arange(end, device=freqs.device, dtype=torch.float32)</span>`,
+  shape: '<b>t</b> shape: (16,)',
+  purpose: '',
+  viz: `<div class="tr">
+  <div class="tc a">0</div><div class="tc a">1</div><div class="tc a">2</div><div class="tc a">3</div><div class="tc a">...</div><div class="tc a">15</div>
+</div>
+序列中16个token的位置编号。`,
+  ex: ''
+},
+
+// 3 - 外积
+{
+  t: 'precompute_freqs_cis · 第 3 行：外积生成角度矩阵',
+  code: `<span class="hl">freqs = torch.outer(t, freqs)</span>`,
+  shape: '<b>freqs</b> (16,) outer (32,) = <b>(16, 32)</b>',
+  purpose: '',
+  viz: `t 和 freqs 不是一一对应，而是每个 t 和每个 freqs 都要配一次，展开成一张表：
+<br><br>
+<table class="tt">
+<tr><th></th><th class="freq">freqs[0]=1.0</th><th class="freq">freqs[1]=0.68</th><th class="freq">freqs[2]=0.47</th><th class="freq">...</th></tr>
+<tr><td class="pos">t[0]=0</td><td class="val">0×1.0=0</td><td class="val">0×0.68=0</td><td class="val">0×0.47=0</td><td class="val">...</td></tr>
+<tr><td class="pos">t[1]=1</td><td class="val">1×1.0=1.0</td><td class="val">1×0.68=0.68</td><td class="val">1×0.47=0.47</td><td class="val">...</td></tr>
+<tr><td class="pos">t[2]=2</td><td class="val">2×1.0=2.0</td><td class="val">2×0.68=1.36</td><td class="val">2×0.47=0.94</td><td class="val">...</td></tr>
+<tr><td class="pos">...</td><td class="val">...</td><td class="val">...</td><td class="val">...</td><td class="val">...</td></tr>
+<tr><td class="pos">t[15]=15</td><td class="val">15×1.0=15</td><td class="val">15×0.68=10.2</td><td class="val">15×0.47=7.05</td><td class="val">...</td></tr>
+</table>
+<b>行方向</b>（固定freq，变t）：同一个维度对，位置越远角度越大 → 感知位置
+<br><b>列方向</b>（固定t，变freq）：同一个位置，低维角度大、高维角度小 → 感知多尺度`,
+  ex: `<b>直觉：</b>位置0角度全是0（不旋转），位置15角度最大。两个token的相对距离 = 角度之差 = (m-n)×freq，这就是RoPE感知相对位置的数学基础。`
+},
+
+// 4 - 极坐标
+{
+  t: 'precompute_freqs_cis · 第 4 行：极坐标转复数',
+  code: `<span class="hl">freqs_cis = torch.polar(torch.ones_like(freqs), freqs)</span>`,
+  shape: '<b>freqs_cis</b> shape: (16, 32) complex64',
+  purpose: '',
+  viz: `<b>torch.polar(模长, 角度)</b> — 极坐标转复数
+<br><br>· 第一个参数 <code>torch.ones_like(freqs)</code> — 模长，全是1，shape和freqs一样 (16,32)
+<br>· 第二个参数 <code>freqs</code> — 角度，就是上一步算出来的角度矩阵 (16,32)
+<br><br>因为模长=1，结果就是单位圆上的点：
+<br><code>torch.polar(1.0, θ) = cos(θ) + i·sin(θ) = e^(iθ)</code>
+<div class="uc-r" style="margin-top:6px">
+  <div class="uc"><div class="xa"></div><div class="ya"></div><svg width="56" height="56" style="position:absolute;top:0;left:0"><line x1="28" y1="28" x2="48" y2="28" stroke="#3b82f6" stroke-width="2"/></svg><div class="lb">θ≈0</div></div>
+  <div class="uc"><div class="xa"></div><div class="ya"></div><svg width="56" height="56" style="position:absolute;top:0;left:0"><line x1="28" y1="28" x2="42" y2="16" stroke="#3b82f6" stroke-width="2"/></svg><div class="lb">θ≈1</div></div>
+  <div class="uc"><div class="xa"></div><div class="ya"></div><svg width="56" height="56" style="position:absolute;top:0;left:0"><line x1="28" y1="28" x2="28" y2="8" stroke="#3b82f6" stroke-width="2"/></svg><div class="lb">θ≈1.57</div></div>
+  <div class="uc"><div class="xa"></div><div class="ya"></div><svg width="56" height="56" style="position:absolute;top:0;left:0"><line x1="28" y1="28" x2="14" y2="16" stroke="#3b82f6" stroke-width="2"/></svg><div class="lb">θ≈2</div></div>
+</div>`,
+  ex: `模长为1意味着后续复数乘法是<b>纯旋转不缩放</b>，向量长度不变。如果模长不为1，乘法会同时改变方向和大小，就不是单纯的位置编码了。`
+},
+
+// ====== reshape_for_broadcast ======
+
+// 5 - reshape_for_broadcast
+{
+  t: 'reshape_for_broadcast：广播对齐',
+  code: `<span class="hl">ndim = x.ndim
+shape = []
+for i, d in enumerate(x.shape):
+    if i == 1 or i == ndim - 1:
+        shape.append(d)
+    else:
+        shape.append(1)
+return freqs_cis.view(*shape)</span>`,
+  shape: '<b>freqs_cis</b> (16, 32) → <b>(1, 16, 1, 32)</b>',
+  purpose: 'freqs_cis 是 2D (16,32)，xq_ 是 4D (2,16,4,32)，维度数不一样没法直接乘。这个函数给 freqs_cis 补维度，让它们形状对齐。',
+  viz: `<b>代码拆解：</b>
+<br>ndim = 4（x 有4个维度）
+<br>遍历 x.shape = (2, 16, 4, 32)，对每个维度判断：
+<br>· i==1 或 i==3（最后维）→ 保留原值
+<br>· 其他 → 填1
+<br><br>
+<table class="tt">
+<tr><th>i</th><th>d</th><th>判断</th><th>shape.append</th></tr>
+<tr><td>0</td><td>2</td><td>不是1也不是3</td><td><b>1</b></td></tr>
+<tr><td>1</td><td>16</td><td>i==1</td><td><b>16</b></td></tr>
+<tr><td>2</td><td>4</td><td>不是1也不是3</td><td><b>1</b></td></tr>
+<tr><td>3</td><td>32</td><td>i==3（最后维）</td><td><b>32</b></td></tr>
+</table>
+shape = [1, 16, 1, 32]
+<br>freqs_cis.view(1, 16, 1, 32) → 从2D变成4D，元素不变
+<br><br>
+<b>广播乘法时：</b>
+<table class="tt">
+<tr><th>维度</th><th>freqs_cis</th><th>xq_</th><th>效果</th></tr>
+<tr><td>batch</td><td><b>1</b></td><td>2</td><td>1自动复制2份</td></tr>
+<tr><td>seq</td><td>16</td><td>16</td><td>相同，直接逐元素对应</td></tr>
+<tr><td>heads</td><td><b>1</b></td><td>4</td><td>1自动复制4份</td></tr>
+<tr><td>dim</td><td>32</td><td>32</td><td>相同，直接逐元素对应</td></tr>
+</table>
+填1的维度（batch、heads）靠广播自动扩展。保留的维度（16、32）两边本来就一样，不需要广播，直接逐元素相乘。
+<br><br>广播完之后两个张量形状都是 (2,16,4,32)，就是位置对位置直接做复数乘法。`,
+  ex: `<b>为什么填1？</b> 填1更通用——不管batch是2还是8、heads是4还是32，代码都能自动适配。所有batch和head用的是同一套旋转角度，不需要每个有自己独立的角度。`
+},
+
+// ====== apply_rotary_emb ======
+
+// 6 - 整体作用
+{
+  t: 'apply_rotary_emb：整体作用',
+  code: `<span class="cm"># xq, xk: (batch, seq, heads, head_dim) 实数
+# freqs_cis: (seq, dim//2) 复数</span>`,
+  shape: '',
+  purpose: '把预计算好的旋转角度应用到 Query 和 Key 向量上。主线：实数→配对→复数→旋转→复数→配对→实数。',
+  viz: `实现分 3 步：
+<br>· TODO 2：实数转复数（.float + reshape + view_as_complex）
+<br>· 广播对齐（reshape_for_broadcast）
+<br>· TODO 3：复数乘法旋转 + 转回实数（view_as_real + flatten）
+<br>· 恢复精度（type_as）`,
+  ex: ''
+},
+
+// 7 - TODO2
+{
+  t: 'apply_rotary_emb · TODO 2：实数转复数',
+  code: `<span class="hl">xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))</span>`,
+  shape: '<b>xq</b> (2,16,4,64) → <b>xq_</b> (2,16,4,32) complex64',
+  purpose: '',
+  viz: `三步链路，从内到外：
+<br><br><b>① xq.float()</b> — FP16→FP32
+<br>避免复数乘法精度溢出产生NaN。LLaMA等模型源码都强制FP32旋转计算。
+<br><br><b>② .reshape(*xq.shape[:-1], -1, 2)</b> — 最后一维64拆成(32,2)
+<br>相邻两数配对，即将解释为复数的(实部, 虚部)
+<div class="tr" style="margin:4px 0">
+  <div class="tc b">0.5</div><div class="tc r">-0.3</div><div class="tc b">0.8</div><div class="tc b">0.1</div>
+  <span style="color:#3b82f6;margin:0 6px">→</span>
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="tr"><div class="tc b">0.5</div><div class="tc r">-0.3</div><span style="font-size:11px;color:#888;margin-left:2px">← 对1</span></div>
+    <div class="tr"><div class="tc b">0.8</div><div class="tc b">0.1</div><span style="font-size:11px;color:#888;margin-left:2px">← 对2</span></div>
+  </div>
+</div>
+shape: (2,16,4,64) → (2,16,4,32,2)
+<br><br><b>③ torch.view_as_complex(...)</b> — 把(实部,虚部)解释为复数
+<div class="tr" style="margin:4px 0">
+  <div class="tc b">0.5</div><div class="tc r">-0.3</div>
+  <span style="color:#3b82f6;margin:0 6px">→</span>
+  <div class="tc g" style="min-width:74px">0.5-0.3i</div>
+</div>
+shape: (2,16,4,32,2) → (2,16,4,32) complex64`,
+  ex: `<b>为什么要配对？</b> RoPE的旋转是在二维平面上做的。把向量的相邻两维看成一个复数，就变成了32个二维旋转，比写32个旋转矩阵更简洁。`
+},
+
+// 8 - 广播
+{
+  t: 'apply_rotary_emb · 广播对齐',
+  code: `<span class="hl">freqs_cis = reshape_for_broadcast(freqs_cis, xq_)</span>`,
+  shape: '<b>freqs_cis</b> (16,32) → <b>(1,16,1,32)</b>',
+  purpose: 'freqs_cis 从 2D 变成 4D，和 xq_ 维度数对齐。广播后两个张量形状都是 (2,16,4,32)，可以逐元素相乘。',
+  viz: `具体效果：位置0的旋转因子 c₀ 从只有一份，变成 2×4=8 份，分别给 2 个 batch、4 个 head 用。但值都一样——所有 batch 和 head 共享同一套旋转角度。
+<br><br>
+<table class="tt">
+<tr><th></th><th>batch0 head0</th><th>batch0 head1</th><th>...</th><th>batch1 head3</th></tr>
+<tr><td class="pos">pos0</td><td class="val">c₀</td><td class="val">c₀</td><td class="val">...</td><td class="val">c₀</td></tr>
+<tr><td class="pos">pos1</td><td class="val">c₁</td><td class="val">c₁</td><td class="val">...</td><td class="val">c₁</td></tr>
+<tr><td class="pos">...</td><td class="val">...</td><td class="val">...</td><td class="val">...</td><td class="val">...</td></tr>
+</table>`,
+  ex: ''
+},
+
+// 9 - TODO3
+{
+  t: 'apply_rotary_emb · TODO 3：复数乘法旋转 + 转回实数',
+  code: `<span class="hl">xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)</span>`,
+  shape: '<b>complex</b>(2,16,4,32) → <b>(2,16,4,32,2)</b> → <b>(2,16,4,64)</b>',
+  purpose: '',
+  viz: `三步链路：
+<br><br><b>① xq_ * freqs_cis</b> — 复数乘法 = 旋转
+<br>乘以 e^(iθ) 相当于把向量在复平面上旋转θ角。
+<br><br>具体例子，假设位置0的第0个维度对：
+<br>xq_ = 0.5-0.3i，freqs_cis = cos(0)+i·sin(0) = 1+0i
+<br>结果 = (0.5-0.3i) × (1+0i) = 0.5-0.3i（角度≈0，几乎不转）
+<br><br>位置1的第0个维度对：
+<br>xq_ = 0.5-0.3i，freqs_cis = cos(1.0)+i·sin(1.0) = 0.54+0.84i
+<br>结果 = (0.5-0.3i) × (0.54+0.84i) = (0.5×0.54-(-0.3)×0.84) + i(0.5×0.84+(-0.3)×0.54) = 0.52+0.26i
+<br><br>
+<table class="tt">
+<tr><th>位置</th><th>xq_</th><th>freqs_cis</th><th>旋转后</th><th>效果</th></tr>
+<tr><td class="pos">pos0</td><td>0.5-0.3i</td><td>1+0i</td><td>0.5-0.3i</td><td>角度≈0，几乎不转</td></tr>
+<tr><td class="pos">pos1</td><td>0.5-0.3i</td><td>0.54+0.84i</td><td>0.52+0.26i</td><td>旋转了约1弧度</td></tr>
+</table>
+模长=1 → 纯旋转，不改变向量长度。位置越远旋转越多。
+<br><br>
+<b>② view_as_real</b> — 复数→(实部,虚部)，在最后增加维度2
+<div class="tr" style="margin:4px 0">
+  <div class="tc g" style="min-width:74px">0.52+0.26i</div>
+  <span style="color:#3b82f6;margin:0 6px">→</span>
+  <div class="tc b">0.52</div><div class="tc b">0.26</div>
+</div>
+shape: (2,16,4,32) → (2,16,4,32,2)
+<br><br><b>③ flatten(3)</b> — 合并最后两维(32,2)回64
+<br>shape: (2,16,4,32,2) → (2,16,4,64)`,
+  ex: `<b>总结：</b>实数→配对→复数→旋转→复数→配对→实数。形状先拆后合，中间用复数乘法完成旋转。`
+},
+
+// 10 - type_as
+{
+  t: 'apply_rotary_emb · 返回值：恢复精度',
+  code: `<span class="hl">return xq_out.type_as(xq), xk_out.type_as(xk)</span>`,
+  shape: 'FP32 → 原始精度(FP16/BF16)',
+  purpose: '',
+  viz: `.type_as(xq) 把FP32结果转回输入的原始精度。
+<br><br>FP16输入 → .float()提升FP32 → 旋转计算 → .type_as()转回FP16
+<br><br>全程FP32计算保证数值稳定，最后转回保持和模型其他部分一致。`,
+  ex: ''
+},
+
+// 11 - test_rope
+{
+  t: 'test_rope：主代码流程',
+  code: `batch_size, seq_len, num_heads, head_dim = 2, 16, 4, 64
+xq = torch.randn(batch_size, seq_len, num_heads, head_dim)
+xk = torch.randn(batch_size, seq_len, num_heads, head_dim)
+freqs_cis = precompute_freqs_cis(head_dim, seq_len)
+xq_out, xk_out = apply_rotary_emb(xq, xk, freqs_cis)`,
+  shape: '',
+  purpose: '用随机张量跑一遍完整流程，验证上面实现的两个函数是否正确。',
+  viz: `<b>整体流程：</b>设定参数 → 创建随机Q/K → 预计算旋转频率 → 应用旋转 → 4项断言验证
+<br><br>
+<table class="tt">
+<tr><th>测试</th><th>断言内容</th><th>验证什么</th></tr>
+<tr><td><b>Test 1</b></td><td>输出shape == 输入shape，输出 ≠ 输入</td><td>形状正确 + 旋转确实生效了</td></tr>
+<tr><td><b>Test 2</b></td><td>旋转前后模长相等，无NaN/Inf</td><td>纯旋转不缩放 + 数值稳定</td></tr>
+<tr><td><b>Test 3</b></td><td>位置0和位置1的输出不同</td><td>不同位置得到不同旋转角度</td></tr>
+<tr><td><b>Test 4</b></td><td>FP16输入不产生NaN，输出仍为FP16</td><td>.float()和.type_as()精度保护生效</td></tr>
+</table>`,
+  ex: ''
+}
+
+];
+
+let cur = 0;
+function render() {
+  const s = S[cur];
+  document.getElementById('pos').textContent = `${cur+1} / ${S.length}`;
+  document.getElementById('prevBtn').disabled = cur===0;
+  document.getElementById('nextBtn').disabled = cur===S.length-1;
+  document.querySelectorAll('.pills button').forEach((b,i)=>b.classList.toggle('on',i===cur));
+  document.getElementById('card').innerHTML = `<h2>${s.t}</h2><div class="code"><pre>${s.code}</pre></div>${s.shape?`<div class="shape">${s.shape}</div>`:''}${s.purpose?`<div class="purpose">${s.purpose}</div>`:''}<div style="font-size:13px;color:#444;line-height:1.8">${s.viz}</div>${s.ex?`<div class="ex">${s.ex}</div>`:''}`;
+}
+function go(d){const n=cur+d;if(n>=0&&n<S.length){cur=n;render();document.getElementById('card').scrollIntoView({behavior:'smooth',block:'start'});}}
+function to(i){cur=i;render();}
+(function(){
+  const p=document.getElementById('pills');
+  S.forEach((s,i)=>{const b=document.createElement('button');b.textContent=i;b.title=s.t;b.onclick=()=>to(i);p.appendChild(b);});
+  document.getElementById('prevBtn').onclick=()=>go(-1);
+  document.getElementById('nextBtn').onclick=()=>go(1);
+  render();
+})();
+document.addEventListener('keydown',e=>{if(e.key==='ArrowLeft')go(-1);if(e.key==='ArrowRight')go(1);});
+</script>
+</body>
+</html>
